@@ -84,6 +84,16 @@ class SyncBeaconMessage : public IConvertibleToBaseMessage {
     uint32_t GetPropagationDelay() const;
     uint8_t GetMaxHops() const;
 
+    /**
+     * @brief Updates the propagation delay field
+     *
+     * This is used by the pre-send callback to set the accurate timing
+     * just before transmission.
+     *
+     * @param propagation_delay_ms New propagation delay value in milliseconds
+     */
+    void UpdatePropagationDelay(uint32_t propagation_delay_ms);
+
     // Calculated/derived field getters
     uint16_t GetSuperframeDuration() const;
 

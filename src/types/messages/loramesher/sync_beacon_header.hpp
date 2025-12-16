@@ -100,11 +100,23 @@ class SyncBeaconHeader : public BaseHeader {
 
     /**
      * @brief Adds propagation delay for forwarding
-     * 
+     *
      * @param additional_delay_ms Delay to add (processing + transmission time)
      */
     void AddPropagationDelay(uint32_t additional_delay_ms) {
         propagation_delay_ms_ += additional_delay_ms;
+    }
+
+    /**
+     * @brief Sets the propagation delay to a specific value
+     *
+     * This is used for updating timing just before transmission to capture
+     * accurate elapsed time from superframe start.
+     *
+     * @param propagation_delay_ms New propagation delay value in milliseconds
+     */
+    void SetPropagationDelay(uint32_t propagation_delay_ms) {
+        propagation_delay_ms_ = propagation_delay_ms;
     }
 
     /**

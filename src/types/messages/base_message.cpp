@@ -15,23 +15,29 @@ BaseMessage::BaseMessage(AddressType dest, AddressType src, MessageType type,
       payload_(data) {}
 
 BaseMessage::BaseMessage(const BaseMessage& other)
-    : header_(other.header_), payload_(other.payload_) {}
+    : header_(other.header_),
+      payload_(other.payload_),
+      pre_send_callback_(other.pre_send_callback_) {}
 
 BaseMessage& BaseMessage::operator=(const BaseMessage& other) {
     if (this != &other) {
         header_ = other.header_;
         payload_ = other.payload_;
+        pre_send_callback_ = other.pre_send_callback_;
     }
     return *this;
 }
 
 BaseMessage::BaseMessage(BaseMessage&& other) noexcept
-    : header_(other.header_), payload_(std::move(other.payload_)) {}
+    : header_(other.header_),
+      payload_(std::move(other.payload_)),
+      pre_send_callback_(std::move(other.pre_send_callback_)) {}
 
 BaseMessage& BaseMessage::operator=(BaseMessage&& other) noexcept {
     if (this != &other) {
         header_ = other.header_;
         payload_ = std::move(other.payload_);
+        pre_send_callback_ = std::move(other.pre_send_callback_);
     }
     return *this;
 }
@@ -127,6 +133,19 @@ Result BaseMessage::ValidateInputs(AddressType dest, AddressType src,
 
     // Validate message type
     return BaseHeader::IsValidMessageType(type);
+}
+
+void BaseMessage::SetPreSendCallback(
+    std::function<void(BaseMessage&)> callback) {
+    pre_send_callback_ = std::move(callback);
+}
+
+bool BaseMessage::InvokePreSendCallback() {
+    if (pre_send_callback_) {
+        pre_send_callback_(*this);
+        return true;
+    }
+    return false;
 }
 
 }  // namespace loramesher

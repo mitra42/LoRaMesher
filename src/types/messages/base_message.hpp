@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -170,10 +171,31 @@ class BaseMessage {
 
     /**
      * @brief Gets the message type
-     * 
+     *
      * @return MessageType Type of the message
      */
     MessageType GetType() const { return header_.GetType(); }
+
+    /**
+     * @brief Sets a callback to be invoked just before message transmission
+     *
+     * This allows messages to update time-sensitive fields right before
+     * serialization and transmission. The callback receives a reference to
+     * this message and can modify it.
+     *
+     * @param callback Function to call before transmission
+     */
+    void SetPreSendCallback(std::function<void(BaseMessage&)> callback);
+
+    /**
+     * @brief Invokes the pre-send callback if one is set
+     *
+     * This should be called by the protocol layer right before transmission
+     * to allow the message to update any time-sensitive fields.
+     *
+     * @return true if a callback was invoked, false if no callback was set
+     */
+    bool InvokePreSendCallback();
 
    private:
     /**
@@ -191,6 +213,9 @@ class BaseMessage {
 
     BaseHeader header_;             ///< Message header
     std::vector<uint8_t> payload_;  ///< Message payload
+
+    ///< Optional callback to invoke before transmission
+    std::function<void(BaseMessage&)> pre_send_callback_;
 };
 
 /**

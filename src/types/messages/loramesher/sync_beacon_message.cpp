@@ -118,6 +118,10 @@ uint32_t SyncBeaconMessage::GetPropagationDelay() const {
     return header_.GetPropagationDelay();
 }
 
+void SyncBeaconMessage::UpdatePropagationDelay(uint32_t propagation_delay_ms) {
+    header_.SetPropagationDelay(propagation_delay_ms);
+}
+
 uint8_t SyncBeaconMessage::GetMaxHops() const {
     return header_.GetMaxHops();
 }
