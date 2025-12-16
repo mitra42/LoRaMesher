@@ -744,6 +744,8 @@ class RTOSMock : public RTOS {
         std::queue<std::vector<uint8_t>> data;
         uint32_t maxSize;
         uint32_t itemSize;
+        bool
+            isSystemQueue;  // True for system semaphores that bypass virtual time
     };
 
     QueueHandle_t CreateQueue(uint32_t length, uint32_t itemSize) override {
@@ -753,7 +755,8 @@ class RTOSMock : public RTOS {
             .notFull = {},   // Default initialize condition variable
             .data = {},      // Default initialize queue
             .maxSize = length,
-            .itemSize = itemSize};
+            .itemSize = itemSize,
+            .isSystemQueue = false};  // Regular queues respect virtual time
         return q;
     }
 
@@ -770,6 +773,9 @@ class RTOSMock : public RTOS {
 
         if (q->data.size() >= q->maxSize) {
             if (timeout == 0) {
+                std::cout << "MOCK: Queue is full, cannot send item"
+                          << std::endl;
+
                 return QueueResult::kFull;
             }
 
@@ -779,6 +785,7 @@ class RTOSMock : public RTOS {
             });
 
             if (!success) {
+                std::cout << "MOCK: Queue send timeout" << std::endl;
                 return QueueResult::kTimeout;
             }
         }
@@ -1246,9 +1253,9 @@ class RTOSMock : public RTOS {
 
                 // If we couldn't find this thread, return error
                 if (!this_task) {
-                    LOG_WARNING(
-                        "MOCK: Could not find task handle for current thread "
-                        "in WaitForNotify");
+                    // LOG_WARNING(
+                    //     "MOCK: Could not find task handle for current thread "
+                    //     "in WaitForNotify");
                     return QueueResult::kError;
                 }
             } else {
@@ -1256,8 +1263,8 @@ class RTOSMock : public RTOS {
                 auto it = tasks_.find(static_cast<std::thread*>(this_task));
                 if (it == tasks_.end()) {
                     this_task = nullptr;  // Reset the cache
-                    LOG_WARNING(
-                        "MOCK: Cached task handle invalid in WaitForNotify");
+                    // LOG_WARNING(
+                    //     "MOCK: Cached task handle invalid in WaitForNotify");
                     return QueueResult::kError;
                 }
                 task_info = &(it->second);
@@ -1265,23 +1272,20 @@ class RTOSMock : public RTOS {
 
             // Quick check for stop request or pending notification without waiting
             if (task_info->stop_requested) {
-                LOG_DEBUG(
-                    "MOCK: Task received stop request during WaitForNotify");
+                // std::cout << "MOCK: Task received stop request during WaitForNotify" << std::endl;
                 return QueueResult::kError;
             }
 
             // IMPORTANT: Check for suspension before checking notification
             if (task_info->suspended) {
-                LOG_DEBUG(
-                    "MOCK: Task is suspended during WaitForNotify, will wait "
-                    "for resume");
+                // std::cout << "MOCK: Task is suspended during WaitForNotify, will wait for resume" << std::endl;
                 // Don't return error here - we should wait for resume or stop
             }
 
             // If we already have a pending notification and not suspended, consume it
             if (task_info->notification_pending && !task_info->suspended) {
                 task_info->notification_pending = false;
-                LOG_DEBUG("MOCK: Consumed pending notification immediately");
+                // std::cout << "MOCK: Consumed pending notification immediately" << std::endl;
                 return QueueResult::kOk;
             }
         }
@@ -1314,8 +1318,7 @@ class RTOSMock : public RTOS {
                     !it->second.resume_acknowledged) {
                     it->second.resume_acknowledged = true;
                     it->second.resume_ack_cv.notify_all();
-                    LOG_DEBUG(
-                        "MOCK: WaitForNotify acknowledged resume operation");
+                    // std::cout << "MOCK: WaitForNotify acknowledged resume operation" << std::endl;
                 }
 
                 // Return true if:
@@ -1352,22 +1355,20 @@ class RTOSMock : public RTOS {
             }
 
             if (it->second.stop_requested) {
-                LOG_DEBUG(
-                    "MOCK: Task received stop request after wait in "
-                    "WaitForNotify");
+                // std::cout << "MOCK: Task received stop request after wait in WaitForNotify" << std::endl;
                 return QueueResult::kError;
             }
 
             // Check what caused us to wake up
             if (it->second.suspended) {
-                LOG_DEBUG("MOCK: WaitForNotify woke up due to suspension");
+                // std::cout << "MOCK: WaitForNotify woke up due to suspension" << std::endl;
 
                 // IMPORTANT: Acknowledge the suspension here since we detected it
                 // This prevents SuspendTask from waiting indefinitely
                 if (!it->second.suspension_acknowledged) {
                     it->second.suspension_acknowledged = true;
                     it->second.suspend_ack_cv.notify_all();
-                    LOG_DEBUG("MOCK: WaitForNotify acknowledged suspension");
+                    // std::cout << "MOCK: WaitForNotify acknowledged suspension" << std::endl;
                 }
 
                 // Don't consume any pending notification while suspended
@@ -1378,11 +1379,11 @@ class RTOSMock : public RTOS {
             if (it->second.notification_pending) {
                 // Notification received and we're not suspended, consume it
                 it->second.notification_pending = false;
-                LOG_DEBUG("MOCK: Notification received after wait");
+                // std::cout << "MOCK: Notification received after wait" << std::endl;
                 return QueueResult::kOk;
             } else {
                 // Timeout occurred
-                LOG_DEBUG("MOCK: Notification wait timeout");
+                // std::cout << "MOCK: Notification wait timeout" << std::endl;
                 return QueueResult::kTimeout;
             }
         }
@@ -1399,11 +1400,14 @@ class RTOSMock : public RTOS {
      */
     SemaphoreHandle_t CreateBinarySemaphore() override {
 
+        std::cout << "MOCK: Creating binary semaphore" << std::endl;
+
         // Create a queue with length 1 and item size 0 (we don't need to store data)
         QueueHandle_t queue = CreateQueue(1, sizeof(uint8_t));
 
-        // Binary semaphores in FreeRTOS start in the "unavailable" state
-        // No need to add any data to the queue
+        // Binary semaphores in FreeRTOS start in the "unavailable" (taken) state
+        // The queue starts empty, which correctly represents this state
+        // No initialization needed - matches xSemaphoreCreateBinary() behavior
 
         return queue;
     }
@@ -1448,9 +1452,11 @@ class RTOSMock : public RTOS {
 
     /**
      * @brief Takes (acquires) a semaphore
-     * 
+     *
      * Taking a semaphore is equivalent to receiving an item from the queue.
-     * 
+     * If the queue is empty (semaphore unavailable), this will block until
+     * an item becomes available or the timeout expires.
+     *
      * @param semaphore Handle to the semaphore
      * @param timeout Maximum time to wait in milliseconds
      * @return true if semaphore was acquired, false on timeout
@@ -1463,9 +1469,10 @@ class RTOSMock : public RTOS {
 
     /**
      * @brief Gives (releases) a semaphore
-     * 
+     *
      * Giving a semaphore is equivalent to sending an item to the queue.
-     * 
+     * This makes the semaphore available for another thread to take.
+     *
      * @param semaphore Handle to the semaphore
      * @return true if successful, false otherwise
      */
@@ -1482,13 +1489,90 @@ class RTOSMock : public RTOS {
      */
     bool GiveSemaphoreFromISR(SemaphoreHandle_t semaphore) override {
         uint8_t dummy = 1;  // Dummy data
-        QueueResult result = SendToQueueISR(semaphore, &dummy);
+        QueueResult result = SendToQueue(semaphore, &dummy, 0);
         return result == QueueResult::kOk;
     }
 
     /**
+     * @brief Creates a system-level binary semaphore that always uses real-time
+     *
+     * System semaphores bypass virtual time mode and always use wall-clock time.
+     * This is essential for infrastructure operations like logging that should not
+     * be affected by test time control.
+     *
+     * @return Handle to the created system semaphore
+     */
+    SemaphoreHandle_t CreateSystemSemaphore() override {
+        std::cout << "MOCK: Creating system semaphore (real-time mode)"
+                  << std::endl;
+
+        std::timed_mutex* system_mutex = new std::timed_mutex();
+        return (SemaphoreHandle_t)system_mutex;
+    }
+
+    /**
+     * @brief Takes a system semaphore (always uses real-time)
+     *
+     * This method bypasses virtual time mode and always uses wall-clock timing.
+     * It's specifically for system semaphores created with CreateSystemSemaphore().
+     *
+     * @param semaphore Handle to the system semaphore
+     * @param timeout Maximum time to wait in milliseconds
+     * @return true if semaphore was acquired, false on timeout
+     */
+    bool TakeSystemSemaphore(SemaphoreHandle_t semaphore,
+                             uint32_t timeout) override {
+        if (!semaphore) {
+            return false;
+        }
+
+        auto* mutex = static_cast<std::timed_mutex*>(semaphore);
+
+        if (timeout == 0) {
+            // No wait - try immediate lock
+            return mutex->try_lock();
+        } else if (timeout == MAX_DELAY) {
+            // Wait forever
+            mutex->lock();
+            return true;
+        } else {
+            // Timed wait
+            return mutex->try_lock_for(std::chrono::milliseconds(timeout));
+        }
+    }
+
+    /**
+     * @brief Gives a system semaphore
+     *
+     * @param semaphore Handle to the system semaphore
+     * @return true if successful, false otherwise
+     */
+    bool GiveSystemSemaphore(SemaphoreHandle_t semaphore) override {
+        if (!semaphore) {
+            return false;
+        }
+
+        auto* mutex = static_cast<std::timed_mutex*>(semaphore);
+        mutex->unlock();
+        return true;
+    }
+
+    /**
+     * @brief Deletes a system semaphore
+     * @param semaphore Handle to the system semaphore to delete
+     */
+    void DeleteSystemSemaphore(SemaphoreHandle_t semaphore) override {
+        if (!semaphore) {
+            return;
+        }
+
+        auto* mutex = static_cast<std::timed_mutex*>(semaphore);
+        delete mutex;
+    }
+
+    /**
      * @brief Cross-platform thread/task yield function
-     * 
+     *
      * Allows a task to yield execution to other tasks of equal priority.
      */
     inline void YieldTask() override { std::this_thread::yield(); }

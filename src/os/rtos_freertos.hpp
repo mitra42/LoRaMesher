@@ -322,11 +322,54 @@ class RTOSFreeRTOS : public RTOS {
     }
 
     /**
+     * @brief Creates a system-level binary semaphore (identical to CreateBinarySemaphore on ESP32)
+     *
+     * On real hardware, system and application semaphores are identical.
+     * The distinction only matters in desktop mock for virtual time handling.
+     *
+     * @return Handle to the created system semaphore
+     */
+    SemaphoreHandle_t CreateSystemSemaphore() override {
+        return CreateBinarySemaphore();
+    }
+
+    /**
+     * @brief Takes a system semaphore (identical to TakeSemaphore on ESP32)
+     *
+     * @param semaphore Handle to the system semaphore
+     * @param timeout Maximum time to wait in milliseconds
+     * @return true if semaphore was acquired, false on timeout
+     */
+    bool TakeSystemSemaphore(SemaphoreHandle_t semaphore,
+                             uint32_t timeout) override {
+        return TakeSemaphore(semaphore, timeout);
+    }
+
+    /**
+     * @brief Gives a system semaphore (identical to GiveSemaphore on ESP32)
+     *
+     * @param semaphore Handle to the system semaphore
+     * @return true if successful, false otherwise
+     */
+    bool GiveSystemSemaphore(SemaphoreHandle_t semaphore) override {
+        return GiveSemaphore(semaphore);
+    }
+
+    /**
+     * @brief Deletes a system semaphore (identical to DeleteSemaphore on ESP32)
+     *
+     * @param semaphore Handle to the system semaphore to delete
+     */
+    void DeleteSystemSemaphore(SemaphoreHandle_t semaphore) override {
+        DeleteSemaphore(semaphore);
+    }
+
+    /**
      * @brief Check if current task should pause or exit
-     * 
+     *
      * In FreeRTOS, this only checks for task deletion requests.
      * In the native mock, this handles pause/resume functionality.
-     * 
+     *
      * @return true if task should stop, false to continue
      */
     bool ShouldStopOrPause() override {

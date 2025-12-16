@@ -263,6 +263,8 @@ class RTOS {
         // };
 
         // return RegisterISR(wrapper);
+        (instance);
+        (member);
         return nullptr;
     }
 
@@ -311,8 +313,57 @@ class RTOS {
     virtual bool GiveSemaphoreFromISR(SemaphoreHandle_t semaphore) = 0;
 
     /**
+     * @brief Creates a system-level binary semaphore that always uses real-time
+     *
+     * System semaphores are intended for infrastructure operations (logging,
+     * internal state management) that should not be affected by virtual time
+     * in testing scenarios. They always use wall-clock time regardless of
+     * time mode setting.
+     *
+     * On ESP32/FreeRTOS, this is identical to CreateBinarySemaphore().
+     * On desktop mock, this bypasses virtual time mode.
+     *
+     * @return Handle to the created system semaphore
+     */
+    virtual SemaphoreHandle_t CreateSystemSemaphore() = 0;
+
+    /**
+     * @brief Takes a system semaphore (always uses real-time)
+     *
+     * This is specifically for system semaphores created with CreateSystemSemaphore().
+     * Using this on a regular semaphore may produce an error in debug builds.
+     *
+     * @param semaphore Handle to the system semaphore
+     * @param timeout Maximum time to wait in milliseconds
+     * @return true if semaphore was acquired, false on timeout
+     */
+    virtual bool TakeSystemSemaphore(SemaphoreHandle_t semaphore,
+                                     uint32_t timeout) = 0;
+
+    /**
+     * @brief Gives a system semaphore
+     *
+     * This is specifically for system semaphores created with CreateSystemSemaphore().
+     * Using this on a regular semaphore may produce an error in debug builds.
+     *
+     * @param semaphore Handle to the system semaphore
+     * @return true if successful, false otherwise
+     */
+    virtual bool GiveSystemSemaphore(SemaphoreHandle_t semaphore) = 0;
+
+    /**
+     * @brief Deletes a system semaphore
+     *
+     * This is specifically for system semaphores created with CreateSystemSemaphore().
+     * Properly deallocates the underlying synchronization primitive.
+     *
+     * @param semaphore Handle to the system semaphore to delete
+     */
+    virtual void DeleteSystemSemaphore(SemaphoreHandle_t semaphore) = 0;
+
+    /**
      * @brief Check if current task should pause or exit
-     * 
+     *
      * @return true if task should stop, false to continue
      */
     virtual bool ShouldStopOrPause() = 0;

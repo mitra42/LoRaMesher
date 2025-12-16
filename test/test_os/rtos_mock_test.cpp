@@ -237,7 +237,8 @@ TEST_F(RTOSMockTest, TaskNotificationTest) {
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
     // Send notification to task
-    rtosInstance->NotifyTaskFromISR(taskHandle);
+    auto resultNotify = rtosInstance->NotifyTask(taskHandle, 0);
+    EXPECT_EQ(resultNotify, QueueResult::kOk);
 
     // Wait for notification to be processed
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -1608,6 +1609,32 @@ TEST_F(RTOSMockTest, SuperframeServiceSignalAndDeletePattern) {
     std::cout
         << "SuperframeService signal-and-delete test completed. Duration: "
         << duration_ms << " ms" << std::endl;
+}
+
+/**
+ * @brief Semaphore basic test
+ */
+TEST_F(RTOSMockTest, SemaphoreTest) {
+    SemaphoreHandle_t semaphore = rtosInstance->CreateBinarySemaphore();
+    ASSERT_NE(semaphore, nullptr);
+
+    // Initial take should fail (semaphore is not given yet)
+    auto result = rtosInstance->TakeSemaphore(semaphore, 0);
+    EXPECT_FALSE(result);
+
+    // Give the semaphore
+    rtosInstance->GiveSemaphore(semaphore);
+
+    // Now take should succeed
+    result = rtosInstance->TakeSemaphore(semaphore, 0);
+    EXPECT_TRUE(result);
+
+    // Taking again should fail
+    result = rtosInstance->TakeSemaphore(semaphore, 0);
+    EXPECT_FALSE(result);
+
+    // Clean up
+    rtosInstance->DeleteSemaphore(semaphore);
 }
 
 #endif  // ARDUINO

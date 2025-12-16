@@ -13,10 +13,12 @@ Logger::Logger() : logger_semaphore_(nullptr) {
 
 void Logger::EnsureSemaphoreInitialized() {
     if (!logger_semaphore_) {
-        logger_semaphore_ = GetRTOS().CreateBinarySemaphore();
+        // Use SYSTEM semaphore - logging is infrastructure, not part of simulation
+        // System semaphores always use real-time and bypass virtual time mode
+        logger_semaphore_ = GetRTOS().CreateSystemSemaphore();
         if (logger_semaphore_) {
             // Initialize semaphore as "given" so it can be taken for first use
-            GetRTOS().GiveSemaphore(logger_semaphore_);
+            GetRTOS().GiveSystemSemaphore(logger_semaphore_);
         }
     }
 }
@@ -25,9 +27,9 @@ void Logger::LogMessage(LogLevel level, const std::string& message) {
     // Lazy initialization of semaphore to avoid static initialization order issues
     EnsureSemaphoreInitialized();
 
-    // Use RTOS semaphore with timeout to prevent blocking
+    // Use RTOS system semaphore with timeout to prevent blocking
     if (!logger_semaphore_ ||
-        !GetRTOS().TakeSemaphore(logger_semaphore_, 100)) {
+        !GetRTOS().TakeSystemSemaphore(logger_semaphore_, 100)) {
         // If semaphore is unavailable or timeout, skip logging to prevent blocking
         return;
     }
@@ -37,41 +39,44 @@ void Logger::LogMessage(LogLevel level, const std::string& message) {
         handler_->Write(level, formatted_message);
     }
 
-    GetRTOS().GiveSemaphore(logger_semaphore_);
+    GetRTOS().GiveSystemSemaphore(logger_semaphore_);
 }
 
 void Logger::SetLogLevel(LogLevel level) {
     EnsureSemaphoreInitialized();
 
-    if (logger_semaphore_ && GetRTOS().TakeSemaphore(logger_semaphore_, 10)) {
+    if (logger_semaphore_ &&
+        GetRTOS().TakeSystemSemaphore(logger_semaphore_, 10)) {
         min_log_level_ = level;
-        GetRTOS().GiveSemaphore(logger_semaphore_);
+        GetRTOS().GiveSystemSemaphore(logger_semaphore_);
     }
 }
 
 void Logger::SetHandler(std::unique_ptr<LogHandler> handler) {
     EnsureSemaphoreInitialized();
 
-    if (logger_semaphore_ && GetRTOS().TakeSemaphore(logger_semaphore_, 10)) {
+    if (logger_semaphore_ &&
+        GetRTOS().TakeSystemSemaphore(logger_semaphore_, 10)) {
         handler_ = std::move(handler);
-        GetRTOS().GiveSemaphore(logger_semaphore_);
+        GetRTOS().GiveSystemSemaphore(logger_semaphore_);
     }
 }
 
 void Logger::Flush() {
     EnsureSemaphoreInitialized();
 
-    if (logger_semaphore_ && GetRTOS().TakeSemaphore(logger_semaphore_, 10)) {
+    if (logger_semaphore_ &&
+        GetRTOS().TakeSystemSemaphore(logger_semaphore_, 10)) {
         if (handler_) {
             handler_->Flush();
         }
-        GetRTOS().GiveSemaphore(logger_semaphore_);
+        GetRTOS().GiveSystemSemaphore(logger_semaphore_);
     }
 }
 
 Logger::~Logger() {
     if (logger_semaphore_) {
-        GetRTOS().DeleteSemaphore(logger_semaphore_);
+        GetRTOS().DeleteSystemSemaphore(logger_semaphore_);
         logger_semaphore_ = nullptr;
     }
 }
