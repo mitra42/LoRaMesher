@@ -23,6 +23,10 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug)
 endif()
 
+if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    message(WARNING "Clang compiler required! Current: ${CMAKE_CXX_COMPILER_ID}")
+endif()
+
 # Compiler warnings
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wall -Wextra -Wpedantic -Werror)
@@ -45,6 +49,14 @@ FetchContent_Declare(
     GIT_TAG 7.1.2
 )
 FetchContent_MakeAvailable(radiolib)
+
+# Mark all RadioLib include directories as system includes
+get_target_property(RADIOLIB_INCLUDES RadioLib INTERFACE_INCLUDE_DIRECTORIES)
+
+if(RADIOLIB_INCLUDES)
+    target_include_directories(RadioLib SYSTEM INTERFACE ${RADIOLIB_INCLUDES})
+endif()
+
 
 # Include directories
 include_directories(

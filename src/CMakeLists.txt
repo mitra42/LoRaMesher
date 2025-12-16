@@ -53,7 +53,12 @@ elseif(BUILD_DESKTOP)
     target_link_libraries(loramesher_lib PUBLIC
         gmock
     )
-    
+
+    # Define DEBUG for test builds to enable mock infrastructure
+    if(BUILD_TESTING)
+        target_compile_definitions(loramesher_lib PUBLIC DEBUG)
+    endif()
+
     # Set output name and version properties
     set_target_properties(loramesher_lib PROPERTIES
         OUTPUT_NAME "LoRaMesher"
