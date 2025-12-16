@@ -398,11 +398,21 @@ The nodes have 6 protocol states:
 - Slot Manager Task: Handles timing and synchronization, determines when actions should occur
 - Radio Event Handler Task: Interfaces with the physical radio, processes radio events
 
-# Questions:
-- What happen when two networks are being joined? We need a process to decide which one is the main one and which is the secondary and need to join.
-- How many message types we need and what should contain.
-    - Routing table update
-    - 
-- I would like to have an inversed order of the routing table to distribute better the messages up and down. This could lead to a complete desyncrhonization of the nodes and should be carefully implemented.
+# Known Issues and Future Work
 
- - What happen if two devices start their discovery at once?
+## Network Synchronization
+- **Network merge handling**: What happens when two independent networks discover each other? Need a process to decide which network is primary and which should merge.
+- **Concurrent discovery**: What happens if two devices start their discovery process simultaneously?
+
+## Routing Table
+- **Update validation**: Currently, routing table updates from devices outside the network are not accepted. This behavior should be documented and verified.
+- **Table order verification**: The order of the routing table entries should be carefully verified to prevent potential synchronization issues.
+- **Distributed message routing**: Consider implementing an inverse routing table order to better distribute messages up and down the network hierarchy. This requires careful implementation to avoid complete desynchronization.
+
+## Sync Beacon Management
+- **Multi-device sync beacons**: How to manage sync beacons across multiple devices? Consider implementing a dedicated sync beacon TX slot for each device.
+- **Network manager synchronization**: Clarify the sync beacon transmission responsibilities when nodes are in Network Manager state.
+
+## Future Enhancements
+- **Message types**: Define comprehensive set of message types and their required fields, particularly for routing table updates.
+- **Load balancing**: Implement better distribution of network traffic across nodes.
