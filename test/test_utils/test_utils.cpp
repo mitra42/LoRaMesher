@@ -1,6 +1,6 @@
 /**
- * @file test/protocols/test_unit.cpp
- * @brief Test suite for lora_mesh unit tests
+ * @file test/test_utils/test_utils.cpp
+ * @brief Unit tests for utility functions
  */
 #include <gtest/gtest.h>
 
@@ -13,15 +13,14 @@ void setup() {
     Serial.begin(115200);
 
     ::testing::InitGoogleTest();
-    if (RUN_ALL_TESTS()) {}
-
-    return;
 }
 
 void loop() {
     // Run tests
+    if (RUN_ALL_TESTS()) {}
 
     // sleep 1 sec
+    delay(1000);
 }
 
 #else

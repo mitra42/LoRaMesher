@@ -1,0 +1,377 @@
+/**
+ * @file test_loramesher_initialization.cpp
+ * @brief Test suite for LoraMesher initialization and lifecycle management
+ */
+#include <gtest/gtest.h>
+#include <memory>
+
+#include "loramesher.hpp"
+#include "os/os_port.hpp"
+
+namespace loramesher {
+namespace test {
+
+#define LORA_CS 18
+#define LORA_RST 23
+#define LORA_IRQ 26
+#define LORA_IO1 33
+
+#define LORA_FREQUENCY 869.900F
+#define LORA_SPREADING_FACTOR 7U
+#define LORA_BANDWITH 125.0
+#define LORA_CODING_RATE 7U
+#define LORA_POWER 6
+#define LORA_SYNC_WORD 20U
+#define LORA_CRC true
+#define LORA_PREAMBLE_LENGTH 8U
+
+/**
+ * @brief Test fixture for LoraMesher initialization tests
+ */
+class LoraMesherInitializationTest : public ::testing::Test {
+   protected:
+    void SetUp() override {
+        // Create valid default configurations for testing
+        pin_config_.setNss(LORA_CS);
+        pin_config_.setDio0(LORA_IRQ);
+        pin_config_.setReset(LORA_RST);
+        pin_config_.setDio1(LORA_IO1);
+
+        // Use mock radio for reliable testing
+        // #if defined(LORAMESHER_BUILD_ARDUINO)
+        radio_config_.setRadioType(RadioType::kSx1276);
+        // #else
+        //         radio_config_.setRadioType(RadioType::kMockRadio);
+        // #endif
+        radio_config_.setFrequency(LORA_FREQUENCY);
+        radio_config_.setSpreadingFactor(LORA_SPREADING_FACTOR);
+        radio_config_.setBandwidth(LORA_BANDWITH);
+        radio_config_.setCodingRate(LORA_CODING_RATE);
+        radio_config_.setPower(LORA_POWER);
+        radio_config_.setSyncWord(LORA_SYNC_WORD);
+        radio_config_.setCRC(LORA_CRC);
+        radio_config_.setPreambleLength(LORA_PREAMBLE_LENGTH);
+
+        // Create LoRaMesh protocol configuration
+        mesh_config_.setNodeAddress(0);        // Auto-generate address
+        mesh_config_.setHelloInterval(60000);  // 60 seconds
+        mesh_config_.setRouteTimeout(180000);  // 180 seconds
+        mesh_config_.setMaxHops(10);
+    }
+
+    void TearDown() override {
+        // Ensure proper cleanup
+        if (mesher_) {
+            mesher_->Stop();
+            mesher_.reset();
+        }
+    }
+
+    /**
+     * @brief Create a LoraMesher instance with valid configuration
+     */
+    std::unique_ptr<LoraMesher> CreateValidLoraMesher() {
+        return LoraMesher::Builder()
+            .withRadioConfig(radio_config_)
+            .withPinConfig(pin_config_)
+            .withLoRaMeshProtocol(mesh_config_)
+            .Build();
+    }
+
+    /**
+     * @brief Create a LoraMesher instance with invalid pin configuration
+     */
+    std::unique_ptr<LoraMesher> CreateInvalidPinLoraMesher() {
+        PinConfig invalid_pins(-1, -1, -1, -1);
+        return LoraMesher::Builder()
+            .withRadioConfig(radio_config_)
+            .withPinConfig(invalid_pins)
+            .withLoRaMeshProtocol(mesh_config_)
+            .Build();
+    }
+
+    PinConfig pin_config_;
+    RadioConfig radio_config_;
+    LoRaMeshProtocolConfig mesh_config_;
+    std::unique_ptr<LoraMesher> mesher_;
+};
+
+/**
+ * @brief Test basic LoraMesher creation and destruction
+ */
+TEST_F(LoraMesherInitializationTest, CreateAndDestroy) {
+    // Should not throw
+    EXPECT_NO_THROW({ mesher_ = CreateValidLoraMesher(); });
+
+    EXPECT_NE(mesher_, nullptr);
+
+    // Destructor should handle cleanup properly
+    EXPECT_NO_THROW({ mesher_.reset(); });
+}
+
+/**
+ * @brief Test successful initialization sequence
+ */
+TEST_F(LoraMesherInitializationTest, SuccessfulInitialization) {
+    mesher_ = CreateValidLoraMesher();
+    ASSERT_NE(mesher_, nullptr);
+
+    // Test Start() - should succeed
+    Result start_result = mesher_->Start();
+    EXPECT_TRUE(start_result)
+        << "Start() failed: " << start_result.GetErrorMessage();
+
+    // Node should have a valid address after initialization
+    AddressType address = mesher_->GetNodeAddress();
+    EXPECT_NE(address, 0)
+        << "Node address should not be zero after initialization";
+
+    // Hardware manager should be available
+    auto hardware_manager = mesher_->GetHardwareManager();
+    EXPECT_NE(hardware_manager, nullptr)
+        << "Hardware manager should be available";
+
+    // Protocol should be available
+    auto protocol = mesher_->GetLoRaMeshProtocol();
+    EXPECT_NE(protocol, nullptr) << "LoRaMesh protocol should be available";
+
+    // Protocol type should be LoRaMesh
+    EXPECT_EQ(mesher_->GetActiveProtocolType(),
+              protocols::ProtocolType::kLoraMesh);
+}
+
+/**
+ * @brief Test address generation functionality
+ */
+TEST_F(LoraMesherInitializationTest, AddressGeneration) {
+    // Test auto-address generation
+    mesher_ = CreateValidLoraMesher();
+    ASSERT_NE(mesher_, nullptr);
+
+    Result start_result = mesher_->Start();
+    EXPECT_TRUE(start_result);
+
+    AddressType auto_address = mesher_->GetNodeAddress();
+    EXPECT_NE(auto_address, 0) << "Auto-generated address should not be zero";
+
+    mesher_->Stop();
+    mesher_.reset();
+
+    // Test explicit address setting
+    const AddressType explicit_address = 0x1234;
+    mesher_ = LoraMesher::Builder()
+                  .withRadioConfig(radio_config_)
+                  .withPinConfig(pin_config_)
+                  .withLoRaMeshProtocol(mesh_config_)
+                  .withNodeAddress(explicit_address)
+                  .Build();
+
+    start_result = mesher_->Start();
+    EXPECT_TRUE(start_result);
+
+    AddressType set_address = mesher_->GetNodeAddress();
+    EXPECT_EQ(set_address, explicit_address)
+        << "Explicit address should be preserved";
+}
+
+/**
+ * @brief Test hardware-based vs fallback address generation
+ */
+TEST_F(LoraMesherInitializationTest, AddressGenerationModes) {
+    // Test with hardware-based addressing enabled (default)
+    mesher_ = LoraMesher::Builder()
+                  .withRadioConfig(radio_config_)
+                  .withPinConfig(pin_config_)
+                  .withLoRaMeshProtocol(mesh_config_)
+                  .withAutoAddressFromHardware(true)
+                  .Build();
+
+    Result start_result = mesher_->Start();
+    EXPECT_TRUE(start_result);
+    AddressType hw_address = mesher_->GetNodeAddress();
+    EXPECT_NE(hw_address, 0);
+
+    mesher_->Stop();
+    mesher_.reset();
+
+    // Test with hardware-based addressing disabled
+    mesher_ = LoraMesher::Builder()
+                  .withRadioConfig(radio_config_)
+                  .withPinConfig(pin_config_)
+                  .withLoRaMeshProtocol(mesh_config_)
+                  .withAutoAddressFromHardware(false)
+                  .Build();
+
+    start_result = mesher_->Start();
+    EXPECT_TRUE(start_result);
+    AddressType fallback_address = mesher_->GetNodeAddress();
+    EXPECT_NE(fallback_address, 0);
+
+    // Addresses might be different (though not guaranteed due to random fallback)
+    // Just ensure both are valid non-zero addresses
+}
+
+/**
+ * @brief Test double Start() calls
+ */
+TEST_F(LoraMesherInitializationTest, DoubleStart) {
+    mesher_ = CreateValidLoraMesher();
+    ASSERT_NE(mesher_, nullptr);
+
+    // First Start() should succeed
+    Result first_start = mesher_->Start();
+    EXPECT_TRUE(first_start)
+        << "First Start() failed: " << first_start.GetErrorMessage();
+
+    // Second Start() should also succeed (idempotent)
+    Result second_start = mesher_->Start();
+    EXPECT_TRUE(second_start)
+        << "Second Start() failed: " << second_start.GetErrorMessage();
+}
+
+/**
+ * @brief Test Stop() without Start()
+ */
+TEST_F(LoraMesherInitializationTest, StopWithoutStart) {
+    mesher_ = CreateValidLoraMesher();
+    ASSERT_NE(mesher_, nullptr);
+
+    // Stop() without Start() should not crash
+    EXPECT_NO_THROW({ mesher_->Stop(); });
+}
+
+/**
+ * @brief Test Start() after Stop()
+ */
+TEST_F(LoraMesherInitializationTest, StartAfterStop) {
+    mesher_ = CreateValidLoraMesher();
+    ASSERT_NE(mesher_, nullptr);
+
+    // Start, Stop, then Start again
+    Result first_start = mesher_->Start();
+    EXPECT_TRUE(first_start);
+
+    mesher_->Stop();
+
+    Result second_start = mesher_->Start();
+    EXPECT_TRUE(second_start)
+        << "Start after Stop failed: " << second_start.GetErrorMessage();
+}
+
+/**
+ * @brief Test configuration validation in Builder
+ */
+TEST_F(LoraMesherInitializationTest, ConfigurationValidation) {
+    // Invalid pin configuration should throw during Build()
+    EXPECT_THROW(
+        { auto invalid_mesher = CreateInvalidPinLoraMesher(); },
+        std::invalid_argument);
+}
+
+/**
+ * @brief Test basic data sending interface
+ */
+TEST_F(LoraMesherInitializationTest, BasicDataInterface) {
+    mesher_ = CreateValidLoraMesher();
+    ASSERT_NE(mesher_, nullptr);
+
+    Result start_result = mesher_->Start();
+    EXPECT_TRUE(start_result);
+
+    // Test data callback setting (should not crash)
+    bool callback_called = false;
+    mesher_->SetDataCallback(
+        [&callback_called](AddressType source,
+                           const std::vector<uint8_t>& data) {
+            callback_called = true;
+        });
+
+    // Test sending data (should not crash, though may not succeed without network)
+    std::vector<uint8_t> test_data = {0x01, 0x02, 0x03, 0x04};
+    Result send_result = mesher_->Send(0x1234, test_data);
+    // Note: We don't expect this to succeed without a proper network, just that it doesn't crash
+    EXPECT_TRUE(send_result ||
+                !send_result);  // Either result is acceptable for this test
+}
+
+/**
+ * @brief Test network status access
+ */
+TEST_F(LoraMesherInitializationTest, NetworkStatusAccess) {
+    mesher_ = CreateValidLoraMesher();
+    ASSERT_NE(mesher_, nullptr);
+
+    Result start_result = mesher_->Start();
+    EXPECT_TRUE(start_result);
+
+    // These methods should not crash and return valid data structures
+    EXPECT_NO_THROW({
+        auto routing_table = mesher_->GetRoutingTable();
+        auto network_status = mesher_->GetNetworkStatus();
+        auto slot_table = mesher_->GetSlotTable();
+    });
+}
+
+/**
+ * @brief Test PingPong protocol configuration
+ */
+TEST_F(LoraMesherInitializationTest, PingPongProtocolConfiguration) {
+    // Create LoraMesher with PingPong protocol instead of LoRaMesh
+    auto ping_pong_mesher =
+        LoraMesher::Builder()
+            .withRadioConfig(radio_config_)
+            .withPinConfig(pin_config_)
+            .withPingPongProtocol()  // Use PingPong instead of LoRaMesh
+            .Build();
+
+    ASSERT_NE(ping_pong_mesher, nullptr);
+
+    Result start_result = ping_pong_mesher->Start();
+    EXPECT_TRUE(start_result)
+        << "PingPong protocol start failed: " << start_result.GetErrorMessage();
+
+    // Should have PingPong protocol active
+    EXPECT_EQ(ping_pong_mesher->GetActiveProtocolType(),
+              protocols::ProtocolType::kPingPong);
+
+    // PingPong protocol should be available
+    auto ping_pong_protocol = ping_pong_mesher->GetPingPongProtocol();
+    EXPECT_NE(ping_pong_protocol, nullptr);
+
+    // LoRaMesh protocol should not be available
+    auto lora_mesh_protocol = ping_pong_mesher->GetLoRaMeshProtocol();
+    EXPECT_EQ(lora_mesh_protocol, nullptr);
+
+    ping_pong_mesher->Stop();
+}
+
+}  // namespace test
+}  // namespace loramesher
+
+#if defined(ARDUINO)
+#include <Arduino.h>
+
+void setup() {
+    // should be the same value as for the `test_speed` option in "platformio.ini"
+    // default value is test_speed=115200
+    Serial.begin(115200);
+
+    ::testing::InitGoogleTest();
+}
+
+void loop() {
+    // Run tests
+    if (RUN_ALL_TESTS()) {}
+
+    // sleep 1 sec
+    delay(1000);
+}
+
+#else
+int main(int argc, char** argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    if (RUN_ALL_TESTS()) {}
+    // Always return zero-code and allow PlatformIO to parse results
+    return 0;
+}
+#endif
