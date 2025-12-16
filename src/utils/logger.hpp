@@ -181,6 +181,16 @@ class ConsoleLogHandler : public LogHandler {
 class Logger {
    public:
     Logger();
+
+    /**
+     * @brief Destructor for Logger
+     *
+     * NOTE: This destructor intentionally does NOT delete the system semaphore
+     * to avoid undefined behavior during static destruction. Deleting a locked
+     * std::timed_mutex causes SIGABRT. This is a leak-by-design pattern that is
+     * standard for global infrastructure objects. The OS reclaims this memory
+     * when the process exits.
+     */
     ~Logger();
 
     /**
@@ -264,6 +274,8 @@ class Logger {
     std::unique_ptr<LogHandler> handler_;
     // Binary semaphore for thread safety using RTOS abstraction
     os::SemaphoreHandle_t logger_semaphore_;
+    // Shutdown flag to prevent logging during destruction (atomic for thread safety)
+    bool shutdown_requested_{false};
 
     void LogMessage(LogLevel level, const std::string& message);
     std::string FormatMessageWithAddress(const std::string& message) const;

@@ -8,6 +8,7 @@
 
 #ifdef LORAMESHER_BUILD_NATIVE
 
+#include <sanitizer/lsan_interface.h>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -1494,11 +1495,20 @@ class RTOSMock : public RTOS {
     }
 
     /**
-     * @brief Creates a system-level binary semaphore that always uses real-time
+     * @brief Creates a system-level binary semaphore using wall-clock time.
      *
-     * System semaphores bypass virtual time mode and always use wall-clock time.
-     * This is essential for infrastructure operations like logging that should not
-     * be affected by test time control.
+     * System semaphores explicitly bypass virtual-time mode and always operate
+     * on real (wall-clock) time. This is required for infrastructure components
+     * such as logging and diagnostics, which must remain functional regardless
+     * of test-time control or time virtualization.
+     *
+     * The returned semaphore has process lifetime and is intentionally never
+     * destroyed. Destroying a std::timed_mutex during static shutdown or while
+     * it may still be locked results in undefined behavior. The operating system
+     * will reclaim the resources when the process exits.
+     *
+     * LeakSanitizer is explicitly instructed to ignore this allocation to avoid
+     * reporting a false-positive leak for this intentional process-lifetime object.
      *
      * @return Handle to the created system semaphore
      */
@@ -1507,6 +1517,7 @@ class RTOSMock : public RTOS {
                   << std::endl;
 
         std::timed_mutex* system_mutex = new std::timed_mutex();
+        __lsan_ignore_object(system_mutex);
         return (SemaphoreHandle_t)system_mutex;
     }
 
@@ -1567,7 +1578,20 @@ class RTOSMock : public RTOS {
         }
 
         auto* mutex = static_cast<std::timed_mutex*>(semaphore);
-        delete mutex;
+
+        // Safety check: Only delete if mutex is unlocked
+        // This prevents SIGABRT from deleting a locked mutex
+        if (mutex->try_lock()) {
+            // Mutex was unlocked, safe to delete
+            mutex->unlock();
+            delete mutex;
+        } else {
+            // Mutex is locked - skip deletion to avoid crash
+            // This is acceptable during program shutdown
+            std::cout << "MOCK: System semaphore is locked, skipping deletion "
+                         "to prevent SIGABRT"
+                      << std::endl;
+        }
     }
 
     /**

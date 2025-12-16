@@ -12,7 +12,7 @@ Logger::Logger() : logger_semaphore_(nullptr) {
 }
 
 void Logger::EnsureSemaphoreInitialized() {
-    if (!logger_semaphore_) {
+    if (!shutdown_requested_ && !logger_semaphore_) {
         // Use SYSTEM semaphore - logging is infrastructure, not part of simulation
         // System semaphores always use real-time and bypass virtual time mode
         logger_semaphore_ = GetRTOS().CreateSystemSemaphore();
@@ -24,6 +24,11 @@ void Logger::EnsureSemaphoreInitialized() {
 }
 
 void Logger::LogMessage(LogLevel level, const std::string& message) {
+    // Skip logging if shutdown has been requested (destructor running)
+    if (shutdown_requested_) {
+        return;
+    }
+
     // Lazy initialization of semaphore to avoid static initialization order issues
     EnsureSemaphoreInitialized();
 
@@ -75,10 +80,14 @@ void Logger::Flush() {
 }
 
 Logger::~Logger() {
-    if (logger_semaphore_) {
-        GetRTOS().DeleteSystemSemaphore(logger_semaphore_);
-        logger_semaphore_ = nullptr;
-    }
+    // Set shutdown flag to prevent new logging attempts
+    shutdown_requested_ = true;
+
+    // IMPORTANT: Do not delete the system semaphore during static destruction.
+    // Deleting a potentially locked std::timed_mutex causes undefined behavior (SIGABRT).
+    // This is intentional - the OS will reclaim this memory when the process exits.
+    // This leak-by-design pattern is standard for global infrastructure objects.
+    logger_semaphore_ = nullptr;
 }
 
 std::string Logger::FormatMessageWithAddress(const std::string& message) const {
