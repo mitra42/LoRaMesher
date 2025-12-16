@@ -818,6 +818,9 @@ void LoRaMeshProtocol::ProcessSlotMessages(SlotAllocation::SlotType slot_type) {
                 auto message =
                     message_queue_service_->ExtractMessageOfType(slot_type);
                 if (message) {
+                    // Invoke pre-send callback to update time-sensitive fields
+                    message->InvokePreSendCallback();
+
                     // TODO: Send using this -> 10.1.3 Collision Mitigation for Same-Hop Forwarders
                     result = hardware_->SendMessage(*message);
                     if (!result) {
@@ -834,6 +837,9 @@ void LoRaMeshProtocol::ProcessSlotMessages(SlotAllocation::SlotType slot_type) {
                 auto message =
                     message_queue_service_->ExtractMessageOfType(slot_type);
                 if (message) {
+                    // Invoke pre-send callback to update time-sensitive fields
+                    message->InvokePreSendCallback();
+
                     // Forward the sync beacon
                     result = hardware_->SendMessage(*message);
                     if (!result) {

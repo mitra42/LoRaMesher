@@ -611,17 +611,28 @@ Result NetworkService::PerformTimingSynchronization(
 
     sync_beacon.Print();
 
-    // Calculate original timing for synchronization using actual reception timestamp
+    // Compensate for processing delay between radio DIO interrupt and timestamp capture
+    // This delay includes: task switch (~5-10ms) + SPI read (~10-20ms) +
+    // deserialization (~5-10ms) + logging (~10-15ms) = ~40-50ms total
+    const uint32_t RECEPTION_PROCESSING_DELAY_MS = 45;
+    uint32_t corrected_reception_timestamp =
+        reception_timestamp - RECEPTION_PROCESSING_DELAY_MS;
+
+    // Calculate original timing for synchronization using corrected reception timestamp
+    uint32_t propagation_delay = sync_beacon.GetPropagationDelay();
     uint32_t time_on_air_ms = CalculateTimeOnAir(sync_beacon.GetTotalSize());
-    uint32_t estimated_nm_time =
-        sync_beacon.CalculateOriginalTiming(reception_timestamp) -
-        time_on_air_ms;
+    uint32_t original_timing =
+        sync_beacon.CalculateOriginalTiming(corrected_reception_timestamp);
+    uint32_t estimated_nm_time = original_timing - time_on_air_ms;
 
     LOG_DEBUG(
-        "%s sync beacon estimated NM time: %u ms (reception: %u ms, "
-        "time_on_air %u ms)",
-        context_name.c_str(), estimated_nm_time, reception_timestamp,
-        time_on_air_ms);
+        "%s sync beacon timing calculation: "
+        "reception_time=%u ms, corrected_reception=%u ms, propagation_delay=%u "
+        "ms, ToA=%u ms, "
+        "original_timing=%u ms, estimated_nm_time=%u ms",
+        context_name.c_str(), reception_timestamp,
+        corrected_reception_timestamp, propagation_delay, time_on_air_ms,
+        original_timing, estimated_nm_time);
 
     // Update superframe configuration to match network manager
     uint16_t superframe_duration = sync_beacon.GetSuperframeDuration();
@@ -642,8 +653,9 @@ Result NetworkService::PerformTimingSynchronization(
     }
 
     // Calculate current slot at the Network Manager when the beacon was sent
+    // Use corrected reception timestamp for consistency with timing calculations
     uint32_t nm_superframe_elapsed =
-        GetRTOS().getTickCount() - estimated_nm_time;
+        corrected_reception_timestamp - estimated_nm_time;
     uint16_t nm_current_slot =
         static_cast<uint16_t>(nm_superframe_elapsed / slot_duration);
 
@@ -1964,20 +1976,17 @@ Result NetworkService::SendSyncBeacon() {
                     total_slots);
     }
 
-    auto superframe_start_time_diff =
-        superframe_service_->GetTimeSinceSuperframeStart();
-
-    // Create original sync beacon with actual parameters
+    // Create original sync beacon with placeholder propagation_delay (0)
+    // The actual timing will be captured by the pre-send callback right before transmission
     auto sync_beacon_opt = SyncBeaconMessage::CreateOriginal(
         0xFFFF,         // Broadcast destination
         node_address_,  // Network manager as source
         node_address_,  // TODO: At this moment NetworkId is network Manager
         total_slots,    // Actual total slots from slot table
         static_cast<uint16_t>(superframe_service_->GetSlotDuration()),
-        node_address_,  // Network manager address
-        config_.guard_time_ms +
-            superframe_start_time_diff,  // Guard time added to propagation delay
-        network_max_hops_);              // Use actual max hops from network
+        node_address_,       // Network manager address
+        0,                   // Placeholder - will be updated by callback
+        network_max_hops_);  // Use actual max hops from network
 
     if (!sync_beacon_opt.has_value()) {
         LOG_ERROR("Failed to create sync beacon message");
@@ -1986,6 +1995,54 @@ Result NetworkService::SendSyncBeacon() {
 
     // Convert to base message and queue for transmission
     BaseMessage base_msg = sync_beacon_opt.value().ToBaseMessage();
+
+    // Set callback to update propagation_delay right before transmission
+    base_msg.SetPreSendCallback([this](BaseMessage& msg) {
+        const uint32_t SERIALIZATION_OVERHEAD_MS = 1;
+        uint32_t actual_time =
+            superframe_service_->GetTimeSinceSuperframeStart() +
+            SERIALIZATION_OVERHEAD_MS;
+
+        // Serialize the current BaseMessage to get the full data
+        auto serialized_opt = msg.Serialize();
+        if (!serialized_opt.has_value()) {
+            LOG_ERROR("Pre-send callback: Failed to serialize base message");
+            return;
+        }
+
+        // Deserialize to SyncBeaconMessage
+        auto beacon_opt =
+            SyncBeaconMessage::CreateFromSerialized(*serialized_opt);
+        if (!beacon_opt.has_value()) {
+            LOG_ERROR("Pre-send callback: Failed to deserialize sync beacon");
+            return;
+        }
+
+        // Update the propagation delay
+        beacon_opt->UpdatePropagationDelay(actual_time);
+
+        // Re-serialize the updated beacon (this gives us BaseHeader + sync fields)
+        auto updated_serialized_opt = beacon_opt->Serialize();
+        if (!updated_serialized_opt.has_value()) {
+            LOG_ERROR("Pre-send callback: Failed to re-serialize sync beacon");
+            return;
+        }
+
+        // Recreate the BaseMessage from the updated serialization
+        auto updated_msg_opt =
+            BaseMessage::CreateFromSerialized(*updated_serialized_opt);
+        if (!updated_msg_opt.has_value()) {
+            LOG_ERROR(
+                "Pre-send callback: Failed to create updated base message");
+            return;
+        }
+
+        // Update the current message with the new data
+        msg = *updated_msg_opt;
+
+        LOG_DEBUG("Pre-send callback: updated propagation_delay to %u ms",
+                  actual_time);
+    });
 
     // Add to sync beacon TX queue - protocol layer handles actual transmission
     auto base_msg_ptr = std::make_unique<BaseMessage>(std::move(base_msg));
@@ -2011,6 +2068,11 @@ Result NetworkService::ForwardSyncBeacon(
 
     // Convert to base message and queue for transmission
     BaseMessage base_msg = forwarded_beacon_opt.value().ToBaseMessage();
+
+    // Note: For forwarded beacons, CreateForwardedBeacon already adds processing_delay
+    // to the original propagation_delay, providing a reasonable approximation.
+    // To improve accuracy further would require tracking reception timestamps,
+    // which is not currently implemented.
 
     // Add to sync beacon TX queue for forwarding
     auto base_msg_ptr = std::make_unique<BaseMessage>(std::move(base_msg));
