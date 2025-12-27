@@ -523,7 +523,7 @@ SuperframeService::SuperframeStats SuperframeService::GetSuperframeStats()
         uint32_t current_time = GetRTOS().getTickCount();
         stats.total_runtime_ms = current_time - service_start_time_;
         stats.sync_drift_ms =
-            sync_drift_accumulator_ / std::max(1u, superframes_completed_);
+            sync_drift_accumulator_ / std::max((uint32_t)1u, superframes_completed_);
     }
 
     if (timing_samples_ > 0) {
@@ -875,4 +875,5 @@ uint32_t SuperframeService::GetTimeSinceSuperframeStart() {
 
 }  // namespace lora_mesh
 }  // namespace protocols
+
 }  // namespace loramesher
